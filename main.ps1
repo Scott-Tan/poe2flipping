@@ -137,7 +137,6 @@ function getItemCategories {
 <#
 #   Get jsons of all items within a category, their properties, and notably their cost based on a reference currency
 #>
-
 function getItemCategoriesByReferenceCurrecy{
     param (
         [string[]] $categoryArray,
@@ -177,10 +176,10 @@ function getItemCategoriesByReferenceCurrecy{
     }
 
 }
+
 <#
 #   Generate csv of item costs by currency
 #>
-
 function getItemCostByCurrency{
     param (
         [string[]] $categoryArray,
@@ -224,51 +223,88 @@ function getItemCostByCurrency{
 
 }
 
+<#
+#   Add real divine cost found from OCR to csv generated based on POE2 Scout data
+#>
 function mergeCSVFromOCR {
     param (
         [string] $csvFile,
         [string] $csvOCR
     )
 
-    $file = Import-Csv -Path $csvFile 
-    $ocrFile = Import-Csv -Path $csvOCR 
+    try {
+        $file = Import-Csv -Path $csvFile 
+        $ocrFile = Import-Csv -Path $csvOCR 
 
-    foreach ($row in $file) {
-        $ocrRow = $ocrFile | Where-Object { $_.text -eq $row.text }
-        if ($null -ne $ocrRow) {
-            $row.realdivcost = $ocrRow.realdivcost
+        foreach ($row in $file) {
+            $ocrRow = $ocrFile | Where-Object { $_.text -eq $row.text }
+            if ($null -ne $ocrRow) {
+                $row.realdivcost = $ocrRow.realdivcost
+            }
         }
+
+        $file | ConvertTo-Csv -NoTypeInformation | ForEach-Object { $_ -replace '"', '' } | Out-File -FilePath $csvFile
+    }
+    catch {
+        outputException `
+            -customMessage "ERR: mergeCSVFromOCR - Error with $csvFile and $csvOCR" `
+            -exceptionMessage $_.Exception.Message `
+            -exceptionStackTrace $_.Exception.StackTrace
     }
 
-    $file | ConvertTo-Csv -NoTypeInformation | ForEach-Object { $_ -replace '"', '' } | Out-File -FilePath $csvFile
 }
 
+<#
+#   Math
+#>
 function doProfitMath {
     param (
         [string] $csvFile
     )
 
-    $file = Import-Csv -Path $csvFile 
-    
-    foreach ($row in $file) {
-        $row.profit = [double]$row.realdivcost - [double]$row.diveqvalue
-        $row.margin = [double]$row.profit / [double]$row.diveqvalue * 100
+    try {
+        $file = Import-Csv -Path $csvFile 
+        
+        foreach ($row in $file) {
+            $row.profit = [double]$row.realdivcost - [double]$row.diveqvalue
+            $row.margin = [double]$row.profit / [double]$row.diveqvalue * 100
+        }
+
+        $file | ConvertTo-Csv -NoTypeInformation | ForEach-Object { $_ -replace '"', '' } | Out-File -FilePath $csvFile
+    }
+    catch {
+        outputException `
+            -customMessage "ERR: doProfitMath - Error with $csvFile" `
+            -exceptionMessage $_.Exception.Message `
+            -exceptionStackTrace $_.Exception.StackTrace
     }
 
-    $file | ConvertTo-Csv -NoTypeInformation | ForEach-Object { $_ -replace '"', '' } | Out-File -FilePath $csvFile
 }
 
+<#
+#   Filter out records that were not OCRed and sort in descending order based on a column
+#    columns should be profit or margin
+#>
 function sortCSV {
     param (
         [string] $csvFile,
         [string] $sortColumn
     )
 
-    $file = Import-Csv -Path $csvFile | Where-Object { [double]$_."realdivcost" -ne 0 }
+    try {
+        $file = Import-Csv -Path $csvFile | Where-Object { [double]$_."realdivcost" -ne 0 }
 
-    $sorted = $file | Sort-Object -Descending { [double]$_.$sortColumn }
+        $sorted = $file | Sort-Object -Descending { [double]$_.$sortColumn }
 
-    $sorted | ConvertTo-Csv -NoTypeInformation | ForEach-Object { $_ -replace '"', '' } | Out-File -FilePath ".\sorted.csv"
+        $sorted | ConvertTo-Csv -NoTypeInformation | ForEach-Object { $_ -replace '"', '' } | Out-File -FilePath ".\sorted.csv"
+    }
+    catch {
+        outputException `
+            -customMessage "ERR: sortCSV - Error with $csvFile and $sortColumn" `
+            -exceptionMessage $_.Exception.Message `
+            -exceptionStackTrace $_.Exception.StackTrace
+    }
+
 }
 
 $currDateTime = Get-Date -f yyyyMMddhhmm
@@ -286,10 +322,14 @@ $itemsCostFile = ".\item_costs.csv"
 
 
 <# user parameters#>
-# DIVINE DOESN'T WORK D:
+# DIVINE DOESN'T WORK. need external source for divine cost.
 [string[]] $currencyArray = "exalted", "chaos"
 $targetLeague = "Fate of the Vaal"
+
+# OCR based csv file should be generated separately and placed in the script folder as ocr_output.csv
+$ocrFile = ".\ocr_output.csv"
 <# user parameters#>
+
 
 
 [string[]] $categoryArray = getItemCategories -outputFile $categoriesFile
@@ -303,7 +343,7 @@ getItemCostByCurrency -categoryArray $categoryArray `
     -outputFile $itemsCostFile
 
 mergeCSVFromOCR -csvFile $itemsCostFile `
-    -csvOCR ".\ocr_output.csv"
+    -csvOCR $ocrFile
 
 doProfitMath -csvFile $itemsCostFile
 
