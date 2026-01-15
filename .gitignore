@@ -2,3 +2,4 @@
 !.gitignore
 !README.md
 !main.ps1
+!ocr_output.csv
