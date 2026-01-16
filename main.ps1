@@ -195,7 +195,7 @@ function doProfitMath {
 }
 
 <#
-#   Filter out records that were not OCRed and sort in descending order based on a column
+#   Sort in descending order based on a column
 #>
 function sortCSV {
     param (
@@ -222,7 +222,7 @@ function sortCSV {
 $currDateTime = Get-Date -f yyyyMMddhhmm
 $expiryDate = (Get-Date).AddMinutes(-1)
 $includeExtensions = @("*.log")
-$excludeExtensions = @("*.json", "*.csv")
+$excludeExtensions = @("*.json", "*.csv", "*.ps1")
 
 $logPath = ".\logs"
 $outputLog = "$logPath\$currDateTime" + "Output.log"
