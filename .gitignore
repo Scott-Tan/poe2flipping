@@ -2,4 +2,6 @@
 !.gitignore
 !README.md
 !main.ps1
+!stochastic.ps1
+!scriptutils.ps1
 !ocr_output.csv

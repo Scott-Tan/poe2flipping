@@ -1,91 +1,5 @@
-################ ---------------- Start of scripting management ---------------- ################
-function outputException{
-    param (
-        [string] $customMessage,
-        $exceptionMessage,
-        $exceptionStackTrace
-    )
-
-    writeToFile -message "ERR: CM - $customMessage" -fileName $outputLog
-    writeToFile -message "ERR: EM - $exceptionMessage" -fileName $outputLog
-    writeToFile -message "ERR: ST - $exceptionStackTrace" -fileName $outputLog
-
-}
-
-function createDir{
-    param(
-        [string] $path,
-        [string] $logName
-    )
-
-    try {
-        if((Test-Path -Path $path) -eq $false){
-            New-Item -Path $path -ItemType Directory
-            writeToFile -message "Created directory: $path" -fileName $logName
-        } else {
-            writetoFile -message "Directory already exists: $path" -fileName $logName
-        }
-    }
-    catch {
-        outputException `
-            -customMessage "ERR: createDir - Error encounter with path: $path and logName $logName" `
-            -exceptionMessage $_.Exception.Message `
-            -exceptionStackTrace $_.Exception.StackTrace
-
-    }
-}
-
-function getTimeStamp {
-    return (Get-Date -Format "yyyy-MM-dd HH:mm:ss.fff K - ")
-}
-
-function writeToFile {
-    param (
-        [string] $message,
-        [string] $fileName
-    )
-
-    Write-Output "$(getTimeStamp)$message" | Out-File -Append $fileName
-
-}
-
-function deleteOldFiles {
-    param (
-        [string[]] $sourcePaths,
-        [string[]] $includeExtensions,
-        [string[]] $excludeExtensions,
-        [datetime] $expiryDate
-    )
-
-    try {
-        $sourcePaths | ForEach-Object {
-            writeToFile -message "deleteOldFiles - Search path: $_" -fileName $outputLog
-            writeToFile -message "deleteOldFiles - Include extensions: $includeExtensions" -fileName $outputLog
-            writeToFile -message "deleteOldFiles - Exclude extensions: $excludeExtensions" -fileName $outputLog
-            writeToFile -message "deleteOldFiles - Expiry date: $expiryDate" -fileName $outputLog
-
-            $files = Get-ChildItem -File -Recurse -Depth 1 -Include $includeExtensions -exclude $excludeExtensions `
-                | Where-Object { $_.CreationTime -lt $expiryDate} | Select-Object FullName, CreationTime
-
-            $files | ForEach-Object -Process {
-                    writeToFile -message "deleteOldFiles - Deleting $($_.Name) with CTime: $($_.CreationTime)" -fileName $outputLog
-                    $_.FullName | Remove-Item
-            } 
-
-            if ($null -eq $files) {
-                writeToFile -message "deleteOldFiles - WRN - No files found in $_" -fileName $outputLog
-            }
-        }
-    }
-    catch {
-        outputException `
-            -customMessage "ERR: deleteOldFiles - Error with sourcePaths: $sourcePaths, includeExtensions: $includeExtensions, excludeExtensions: $excludeExtensions, expiryDate: $expiryDate" `
-            -exceptionMessage $_.Exception.Message `
-            -exceptionStackTrace $_.Exception.StackTrace
-    }
-}
-
-################ ---------------- End of scripting management ---------------- ################
+. ".\scriptUtilities.ps1"
+. ".\stochastic.ps1"
 
 <#
 #   Get exchange rate of a currency to divine 
@@ -182,7 +96,6 @@ function getItemCategoriesByReferenceCurrecy{
 #>
 function getItemCostByCurrency{
     param (
-        [string[]] $categoryArray,
         [string[]] $currencyArray,
         [string] $outputFile
     )
@@ -216,7 +129,7 @@ function getItemCostByCurrency{
     }
     catch {
         outputException `
-            -customMessage "ERR: getItemCostByCurrency - Error with categoryArray: $categoryArray and currencyArray: $currencyArray" `
+            -customMessage "ERR: getItemCostByCurrency - Error with currencyArray: $currencyArray" `
             -exceptionMessage $_.Exception.Message `
             -exceptionStackTrace $_.Exception.StackTrace
     }
@@ -283,7 +196,6 @@ function doProfitMath {
 
 <#
 #   Filter out records that were not OCRed and sort in descending order based on a column
-#    columns should be profit or margin
 #>
 function sortCSV {
     param (
@@ -292,11 +204,11 @@ function sortCSV {
     )
 
     try {
-        $file = Import-Csv -Path $csvFile | Where-Object { [double]$_."realdivcost" -ne 0 }
+        $file = Import-Csv -Path $csvFile
 
         $sorted = $file | Sort-Object -Descending { [double]$_.$sortColumn }
 
-        $sorted | ConvertTo-Csv -NoTypeInformation | ForEach-Object { $_ -replace '"', '' } | Out-File -FilePath ".\sorted.csv"
+        $sorted | ConvertTo-Csv -NoTypeInformation | ForEach-Object { $_ -replace '"', '' } | Out-File -FilePath $csvFile
     }
     catch {
         outputException `
@@ -314,23 +226,35 @@ $excludeExtensions = @("*.json", "*.csv")
 
 $logPath = ".\logs"
 $outputLog = "$logPath\$currDateTime" + "Output.log"
-createDir -path ".\logs" -logName $outputLog
+
+createDir -path $logPath -logName $outputLog
 createDir -path ".\categoriesCost" -logName $outputLog
+createDir -path ".\itemHistory" -logName $outputLog
 
 $categoriesFile = ".\item_categories.json"
 $itemsCostFile = ".\item_costs.csv"
+$histName = "item_history"
+$itemHistFile = ".\$histName.csv"
+$SOHistFile = ".\SO$histName.csv"
 
 
-<# user parameters#>
+################ ---------------- User Parameters ---------------- ################
 # DIVINE DOESN'T WORK. need external source for divine cost.
-[string[]] $currencyArray = "exalted", "chaos"
+#[string[]] $currencyArray = "exalted", "chaos"
+[string[]] $currencyArray = "exalted"
 $targetLeague = "Fate of the Vaal"
 
 # OCR based csv file should be generated separately and placed in the script folder as ocr_output.csv
 $ocrFile = ".\ocr_output.csv"
-<# user parameters#>
+
+# must be mutiple of 4
+[int]$bins = 40
+################ ---------------- User Parameters ---------------- ################
 
 
+################ ---------------- Core ---------------- ################
+
+<#
 
 [string[]] $categoryArray = getItemCategories -outputFile $categoriesFile
 
@@ -338,17 +262,39 @@ getItemCategoriesByReferenceCurrecy -categoryArray $categoryArray `
     -referenceCurrencyArray $currencyArray `
     -targetLeague $targetLeague
 
-getItemCostByCurrency -categoryArray $categoryArray `
-    -currencyArray $currencyArray `
+getItemCostByCurrency -currencyArray $currencyArray `
     -outputFile $itemsCostFile
+
 
 mergeCSVFromOCR -csvFile $itemsCostFile `
     -csvOCR $ocrFile
+
 
 doProfitMath -csvFile $itemsCostFile
 
 sortCSV -csvFile $itemsCostFile `
     -sortColumn "margin"
+
+#>
+
+################ ---------------- Core ---------------- ################
+
+################ ---------------- Stochastic ---------------- ################
+
+getItemHistory -currencyArray $currencyArray `
+    -bins $bins `
+    -targetLeague $targetLeague
+
+makeCSV -outputFile $itemHistFile
+
+calcStochasticOscillator -srcCSVFile $itemHistFile `
+    -destCSVFile $SOHistFile `
+    -bins $bins
+
+#sortCSV -csvFile $SOHistFile `
+#    -sortColumn "stochasticOscilator"
+
+################ ---------------- Stochastic ---------------- ################
 
 deleteOldFiles -sourcePaths $logPath `
     -includeExtensions $includeExtensions `
